@@ -1,25 +1,43 @@
-import azure.functions as func
 import logging
+import azure.functions as func
+import base64
+import fitz  # PyMuPDF
+import json
 
-app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
+def extract_links_from_pdf(pdf_bytes):
+    urls = []
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+        for page in doc:
+            links = page.get_links()
+            for link in links:
+                if 'uri' in link:
+                    urls.append(link['uri'])
+    return urls
 
-@app.route(route="LinkFromPDF")
-def LinkFromPDF(req: func.HttpRequest) -> func.HttpResponse:
-    logging.info('Python HTTP trigger function processed a request.')
+def main(req: func.HttpRequest) -> func.HttpResponse:
+    logging.info('Processing request to extract URLs from PDF.')
 
-    name = req.params.get('name')
-    if not name:
-        try:
-            req_body = req.get_json()
-        except ValueError:
-            pass
-        else:
-            name = req_body.get('name')
+    try:
+        body = req.get_json()
+        base64_pdf = body.get('pdf_base64')
 
-    if name:
-        return func.HttpResponse(f"Hello, {name}. This HTTP triggered function executed successfully.")
-    else:
+        if not base64_pdf:
+            return func.HttpResponse(
+                "Missing 'pdf_base64' in request body.",
+                status_code=400
+            )
+
+        pdf_bytes = base64.b64decode(base64_pdf)
+        urls = extract_links_from_pdf(pdf_bytes)
+
         return func.HttpResponse(
-             "This HTTP triggered function executed successfully. Pass a name in the query string or in the request body for a personalized response.",
-             status_code=200
+            json.dumps({"urls": urls}),
+            mimetype="application/json"
+        )
+
+    except Exception as e:
+        logging.error(f"Error processing PDF: {e}")
+        return func.HttpResponse(
+            f"Internal server error: {str(e)}",
+            status_code=500
         )
